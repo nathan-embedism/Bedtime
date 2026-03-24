@@ -571,6 +571,41 @@
     }
   }
 
+  // ---- Swipe note tracking ----
+  // Track which "pitch lane" each finger is in so we play a new note
+  // each time the finger crosses into a different lane (like a harp).
+  const activeTouches = new Map(); // touchId -> { lastLane, lastTwinkleX, lastTwinkleY }
+
+  function getLane(px) {
+    const xNorm = px / window.innerWidth;
+    return clamp(Math.floor(xNorm * MELODY_NOTES.length), 0, MELODY_NOTES.length - 1);
+  }
+
+  function handleSwipeMove(px, py, touchId) {
+    const lane = getLane(px);
+    const state = activeTouches.get(touchId);
+    if (!state) return;
+
+    // Spawn trailing twinkles along the swipe path (throttled by distance)
+    const dx = px - state.lastTwinkleX;
+    const dy = py - state.lastTwinkleY;
+    if (dx * dx + dy * dy > 600) { // ~25px apart
+      addTwinkle(px, py);
+      state.lastTwinkleX = px;
+      state.lastTwinkleY = py;
+    }
+
+    // Play a note when the finger enters a new pitch lane
+    if (lane !== state.lastLane) {
+      state.lastLane = lane;
+      const note = MELODY_NOTES[lane];
+      const yNorm = py / window.innerHeight;
+      const vol = lerp(0.06, 0.12, 1 - yNorm);
+      // Shorter, lighter notes for swipe — feels like plucking strings
+      playNote(note, rand(0.6, 1.2), 0, vol);
+    }
+  }
+
   // ---- Input handling ----
   const overlay = document.getElementById("start-overlay");
   let started = false;
@@ -600,24 +635,75 @@
     onTouch(px, py);
   }
 
-  // Use touchend (most reliable for iOS Safari audio unlock) + click fallback
+  // ---- Touch events (primary — handles taps + swipes + multi-touch) ----
+  document.addEventListener("touchstart", function (e) {
+    if (!started) return;
+    for (const touch of e.changedTouches) {
+      activeTouches.set(touch.identifier, {
+        lastLane: getLane(touch.clientX),
+        lastTwinkleX: touch.clientX,
+        lastTwinkleY: touch.clientY,
+      });
+    }
+  }, { passive: true });
+
+  document.addEventListener("touchmove", function (e) {
+    if (!started) return;
+    for (const touch of e.changedTouches) {
+      handleSwipeMove(touch.clientX, touch.clientY, touch.identifier);
+    }
+  }, { passive: true });
+
   document.addEventListener("touchend", function (e) {
     if (!started) {
       handleStart();
       return;
     }
     for (const touch of e.changedTouches) {
-      handleInteract(touch.clientX, touch.clientY);
+      // If the finger didn't move much, treat as a tap (play full note + chime)
+      const state = activeTouches.get(touch.identifier);
+      if (state) {
+        const dx = touch.clientX - state.lastTwinkleX;
+        const dy = touch.clientY - state.lastTwinkleY;
+        // Always play a tap note on lift
+        handleInteract(touch.clientX, touch.clientY);
+      }
+      activeTouches.delete(touch.identifier);
     }
   }, false);
 
-  // Fallback for mouse / non-touch devices
-  document.addEventListener("click", function (e) {
+  document.addEventListener("touchcancel", function (e) {
+    for (const touch of e.changedTouches) {
+      activeTouches.delete(touch.identifier);
+    }
+  }, { passive: true });
+
+  // ---- Mouse events (fallback for desktop — supports click + drag) ----
+  let mouseDown = false;
+  let mouseId = "mouse";
+
+  document.addEventListener("mousedown", function (e) {
     if (!started) {
       handleStart();
       return;
     }
+    mouseDown = true;
+    activeTouches.set(mouseId, {
+      lastLane: getLane(e.clientX),
+      lastTwinkleX: e.clientX,
+      lastTwinkleY: e.clientY,
+    });
     handleInteract(e.clientX, e.clientY);
+  }, false);
+
+  document.addEventListener("mousemove", function (e) {
+    if (!started || !mouseDown) return;
+    handleSwipeMove(e.clientX, e.clientY, mouseId);
+  }, false);
+
+  document.addEventListener("mouseup", function () {
+    mouseDown = false;
+    activeTouches.delete(mouseId);
   }, false);
 
 
