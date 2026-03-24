@@ -103,21 +103,32 @@
   createClouds();
 
   // ---- Touch twinkles ----
+  const MAX_TWINKLES = 120;
   const twinkles = [];
 
-  function addTwinkle(px, py) {
-    const count = Math.floor(rand(6, 14));
+  // light = true for swipe trail (fewer, smaller, faster-fading particles)
+  function addTwinkle(px, py, light) {
+    const count = light ? Math.floor(rand(2, 4)) : Math.floor(rand(5, 10));
+    const maxSpeed = light ? 1.2 : 2.5;
+    const decayLo = light ? 0.02 : 0.008;
+    const decayHi = light ? 0.04 : 0.02;
+
+    // If near the cap, remove oldest particles to make room
+    while (twinkles.length + count > MAX_TWINKLES) {
+      twinkles.shift();
+    }
+
     for (let i = 0; i < count; i++) {
       const angle = rand(0, Math.PI * 2);
-      const speed = rand(0.3, 2.5);
+      const speed = rand(0.2, maxSpeed);
       twinkles.push({
         x: px * devicePixelRatio,
         y: py * devicePixelRatio,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
-        r: rand(1.5, 4),
+        r: rand(1.2, light ? 2.5 : 3.5),
         life: 1,
-        decay: rand(0.005, 0.018),
+        decay: rand(decayLo, decayHi),
         hue: rand(190, 280),
       });
     }
@@ -267,19 +278,39 @@
   }
 
   function drawTwinkles() {
+    const n = twinkles.length;
+    // Use simple circles when many particles, radial gradients when few
+    const simple = n > 50;
+
     for (const p of twinkles) {
-      ctx.globalAlpha = p.life * 0.8;
-      const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 5);
-      glow.addColorStop(0, `hsla(${p.hue}, 70%, 80%, 0.6)`);
-      glow.addColorStop(1, `hsla(${p.hue}, 70%, 80%, 0)`);
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r * 5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = `hsla(${p.hue}, 80%, 90%, 0.9)`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fill();
+      const alpha = p.life * 0.8;
+      if (simple) {
+        // Fast path: single filled circle with glow approximated by larger faded circle
+        ctx.globalAlpha = alpha * 0.25;
+        ctx.fillStyle = `hsl(${p.hue}, 70%, 80%)`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r * 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = `hsl(${p.hue}, 80%, 92%)`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // Pretty path: radial gradient glow
+        ctx.globalAlpha = alpha;
+        const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 5);
+        glow.addColorStop(0, `hsla(${p.hue}, 70%, 80%, 0.6)`);
+        glow.addColorStop(1, `hsla(${p.hue}, 70%, 80%, 0)`);
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r * 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = `hsla(${p.hue}, 80%, 90%, 0.9)`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.globalAlpha = 1;
   }
@@ -312,8 +343,6 @@
   function frame(ts) {
     if (!startTime) startTime = ts;
     const t = (ts - startTime) / 1000;
-
-    resize(); // handle dynamic resize
 
     drawSky(t);
     drawMoon(t);
@@ -586,11 +615,11 @@
     const state = activeTouches.get(touchId);
     if (!state) return;
 
-    // Spawn trailing twinkles along the swipe path (throttled by distance)
+    // Spawn light trailing twinkles along the swipe path (throttled by distance)
     const dx = px - state.lastTwinkleX;
     const dy = py - state.lastTwinkleY;
-    if (dx * dx + dy * dy > 600) { // ~25px apart
-      addTwinkle(px, py);
+    if (dx * dx + dy * dy > 1600) { // ~40px apart
+      addTwinkle(px, py, true);
       state.lastTwinkleX = px;
       state.lastTwinkleY = py;
     }
