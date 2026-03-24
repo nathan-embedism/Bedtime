@@ -338,32 +338,45 @@
   let masterGain = null;
   let reverbNode = null;
 
-  // Pentatonic scale degrees for gentle melodies (C major pentatonic across octaves)
-  const BASE_NOTES = [
-    261.63, 293.66, 329.63, 392.00, 440.00, // C4 D4 E4 G4 A4
-    523.25, 587.33, 659.25, 783.99, 880.00, // C5 D5 E5 G5 A5
+  // Melody notes: C major pentatonic in a warm, music-box range (C4–G5)
+  // Avoiding A (can sound tense) — using C D E G only across two octaves
+  const MELODY_NOTES = [
+    261.63, 293.66, 329.63, 392.00,           // C4 D4 E4 G4
+    523.25, 587.33, 659.25, 783.99,           // C5 D5 E5 G5
   ];
 
-  // Lower drone notes
-  const DRONE_NOTES = [130.81, 196.00, 164.81]; // C3, G3, E3
+  // Harmonious intervals: for any melody note, pick a consonant partner
+  // (a third above, a fifth above, or an octave)
+  function getHarmony(freq) {
+    const options = [freq * 5 / 4, freq * 3 / 2, freq * 2]; // major 3rd, 5th, octave
+    return options[Math.floor(Math.random() * options.length)];
+  }
 
-  let currentScale = [...BASE_NOTES];
-  let droneOsc = null;
-  let droneGain = null;
+  // Warm pad chord roots — all major-feeling (C, F, G in comfortable octaves)
+  const PAD_CHORDS = [
+    [261.63, 329.63, 392.00],  // C major  (C4 E4 G4)
+    [349.23, 440.00, 523.25],  // F major  (F4 A4 C5)
+    [392.00, 493.88, 587.33],  // G major  (G4 B4 D5)
+  ];
+  let currentChordIdx = 0;
+
   let padOscs = [];
   let padGains = [];
+  let droneOscs = [];
+  let droneGains = [];
   let melodyTimer = null;
-  let currentDroneTarget = DRONE_NOTES[0];
+  let chordTimer = null;
 
   function createReverb() {
-    // Simple algorithmic reverb via convolver with generated impulse
+    // Short, warm reverb — fast decay avoids eerie trailing wash
     const sampleRate = audioCtx.sampleRate;
-    const length = sampleRate * 3;
+    const length = sampleRate * 1.5; // 1.5 seconds (shorter = warmer)
     const impulse = audioCtx.createBuffer(2, length, sampleRate);
     for (let ch = 0; ch < 2; ch++) {
       const data = impulse.getChannelData(ch);
       for (let i = 0; i < length; i++) {
-        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2.5);
+        // Steeper exponential decay (4.0) for a cosy room feel
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 4.0);
       }
     }
     const conv = audioCtx.createConvolver();
@@ -404,47 +417,71 @@
   }
 
   function startDrone() {
-    droneOsc = audioCtx.createOscillator();
-    droneOsc.type = "sine";
-    droneOsc.frequency.value = DRONE_NOTES[0];
-
-    droneGain = audioCtx.createGain();
-    droneGain.gain.setValueAtTime(0, audioCtx.currentTime);
-    droneGain.gain.linearRampToValueAtTime(0.12, audioCtx.currentTime + 4);
-
-    // Gentle slow LFO for subtle vibrato
-    const lfo = audioCtx.createOscillator();
-    const lfoGain = audioCtx.createGain();
-    lfo.frequency.value = 0.15;
-    lfoGain.gain.value = 1.5;
-    lfo.connect(lfoGain);
-    lfoGain.connect(droneOsc.frequency);
-    lfo.start();
-
-    droneOsc.connect(droneGain);
-    droneGain.connect(masterGain);
-    droneOsc.start();
-  }
-
-  function startPad() {
-    // Soft pad: two detuned triangle waves
-    const notes = [261.63, 392.00]; // C4, G4
-    for (const freq of notes) {
+    // Warm, soft major chord drone using triangle waves (no vibrato — steady and safe)
+    const chord = PAD_CHORDS[0]; // Start on C major
+    for (let i = 0; i < chord.length; i++) {
       const osc = audioCtx.createOscillator();
       osc.type = "triangle";
-      osc.frequency.value = freq;
+      osc.frequency.value = chord[i];
 
       const gain = audioCtx.createGain();
-      gain.gain.setValueAtTime(0, audioCtx.currentTime);
-      gain.gain.linearRampToValueAtTime(0.04, audioCtx.currentTime + 5);
+      gain.gain.setValueAtTime(0.001, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.035, audioCtx.currentTime + 4);
 
-      osc.connect(gain);
+      // Gentle lowpass to keep it soft
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 800;
+      filter.Q.value = 0.3;
+
+      osc.connect(filter);
+      filter.connect(gain);
       gain.connect(masterGain);
       osc.start();
 
-      padOscs.push(osc);
-      padGains.push(gain);
+      droneOscs.push(osc);
+      droneGains.push(gain);
     }
+
+    // Slowly cycle through major chords for gentle harmonic movement
+    scheduleChordChange();
+  }
+
+  function scheduleChordChange() {
+    chordTimer = setTimeout(function changeChord() {
+      currentChordIdx = (currentChordIdx + 1) % PAD_CHORDS.length;
+      const chord = PAD_CHORDS[currentChordIdx];
+      const now = audioCtx.currentTime;
+      for (let i = 0; i < droneOscs.length; i++) {
+        droneOscs[i].frequency.setValueAtTime(droneOscs[i].frequency.value, now);
+        droneOscs[i].frequency.linearRampToValueAtTime(chord[i], now + 4);
+      }
+      chordTimer = setTimeout(changeChord, rand(10000, 18000));
+    }, rand(10000, 18000));
+  }
+
+  function startPad() {
+    // Extra-soft high sine pad for shimmer — just the root an octave up
+    const osc = audioCtx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = 523.25; // C5
+
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 600;
+    filter.Q.value = 0.2;
+
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0.001, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.02, audioCtx.currentTime + 6);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(masterGain);
+    osc.start();
+
+    padOscs.push(osc);
+    padGains.push(gain);
   }
 
   function playNote(freq, duration, delay, volume) {
@@ -475,19 +512,28 @@
   }
 
   function scheduleMelody() {
-    // Play a gentle note every 1.5-4 seconds
-    function next() {
-      const note = currentScale[Math.floor(Math.random() * currentScale.length)];
-      const duration = rand(1.5, 3.5);
-      playNote(note, duration, 0, rand(0.05, 0.12));
+    // Play gentle stepwise melodies — prefer small intervals (neighbouring notes)
+    // rather than random jumps, which sound more musical and less eerie
+    let lastIdx = Math.floor(MELODY_NOTES.length / 2); // start in the middle
 
-      // Occasionally play a soft harmony
-      if (Math.random() < 0.3) {
-        const harmony = currentScale[Math.floor(Math.random() * currentScale.length)];
-        playNote(harmony, duration * 0.8, 0.3, rand(0.03, 0.06));
+    function next() {
+      // Step to a nearby note (±1 or ±2 in the scale) for smooth melodic motion
+      const step = Math.random() < 0.7
+        ? (Math.random() < 0.5 ? -1 : 1)   // small step
+        : (Math.random() < 0.5 ? -2 : 2);   // slightly larger step
+      lastIdx = clamp(lastIdx + step, 0, MELODY_NOTES.length - 1);
+
+      const note = MELODY_NOTES[lastIdx];
+      const duration = rand(1.8, 3.0);
+      playNote(note, duration, 0, rand(0.06, 0.10));
+
+      // Occasionally add a consonant harmony (major 3rd, 5th, or octave)
+      if (Math.random() < 0.25) {
+        const harmony = getHarmony(note);
+        playNote(harmony, duration * 0.7, 0.15, rand(0.02, 0.04));
       }
 
-      const interval = rand(1500, 4000);
+      const interval = rand(2000, 4500);
       melodyTimer = setTimeout(next, interval);
     }
     next();
@@ -502,30 +548,26 @@
     const xNorm = px / window.innerWidth;   // 0 = left, 1 = right
     const yNorm = py / window.innerHeight;  // 0 = top,  1 = bottom
 
-    // Play a touch-responsive note: pitch based on X, volume on Y
-    const scaleIdx = Math.floor(xNorm * currentScale.length);
-    const note = currentScale[clamp(scaleIdx, 0, currentScale.length - 1)];
-    const vol = lerp(0.08, 0.15, 1 - yNorm);
-    playNote(note, rand(1.0, 2.5), 0, vol);
+    // Play a touch-responsive note from the melody scale
+    const scaleIdx = Math.floor(xNorm * MELODY_NOTES.length);
+    const note = MELODY_NOTES[clamp(scaleIdx, 0, MELODY_NOTES.length - 1)];
+    const vol = lerp(0.08, 0.14, 1 - yNorm);
+    playNote(note, rand(1.0, 2.0), 0, vol);
 
-    // Play a soft chime an octave up
-    playNote(note * 2, rand(0.8, 1.5), 0.05, vol * 0.3);
+    // Play a consonant chime (major 3rd or 5th above, never random)
+    const chime = getHarmony(note);
+    playNote(chime, rand(0.6, 1.2), 0.05, vol * 0.2);
 
-    // Gently shift the drone based on touch region
-    const droneIdx = Math.floor(xNorm * DRONE_NOTES.length);
-    const newDrone = DRONE_NOTES[clamp(droneIdx, 0, DRONE_NOTES.length - 1)];
-    if (newDrone !== currentDroneTarget) {
-      currentDroneTarget = newDrone;
-      droneOsc.frequency.linearRampToValueAtTime(newDrone, audioCtx.currentTime + 2);
-    }
-
-    // Shift pad chord gently based on Y position
-    const padShift = yNorm < 0.33 ? 1.06 : yNorm < 0.66 ? 1.0 : 0.94;
-    for (let i = 0; i < padOscs.length; i++) {
-      const baseFreq = i === 0 ? 261.63 : 392.00;
-      padOscs[i].frequency.linearRampToValueAtTime(
-        baseFreq * padShift, audioCtx.currentTime + 1.5
-      );
+    // Gently nudge the drone chord based on screen third
+    const chordIdx = yNorm < 0.33 ? 2 : yNorm < 0.66 ? 0 : 1; // G, C, F
+    if (chordIdx !== currentChordIdx) {
+      currentChordIdx = chordIdx;
+      const chord = PAD_CHORDS[chordIdx];
+      const now = audioCtx.currentTime;
+      for (let i = 0; i < droneOscs.length; i++) {
+        droneOscs[i].frequency.setValueAtTime(droneOscs[i].frequency.value, now);
+        droneOscs[i].frequency.linearRampToValueAtTime(chord[i], now + 3);
+      }
     }
   }
 
