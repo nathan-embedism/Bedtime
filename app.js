@@ -374,13 +374,19 @@
   function initAudio() {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-    // Mobile browsers require explicit resume inside a user gesture
-    if (audioCtx.state === "suspended") {
-      audioCtx.resume();
-    }
+    // iOS Safari: must resume AND play a buffer source in the user gesture
+    // to fully unlock audio (including when the hardware silent switch is on).
+    audioCtx.resume();
+
+    // Play a tiny silent buffer to "warm up" the audio graph on iOS
+    const silentBuf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+    const silentSrc = audioCtx.createBufferSource();
+    silentSrc.buffer = silentBuf;
+    silentSrc.connect(audioCtx.destination);
+    silentSrc.start();
 
     masterGain = audioCtx.createGain();
-    masterGain.gain.setValueAtTime(0, audioCtx.currentTime);
+    masterGain.gain.setValueAtTime(0.001, audioCtx.currentTime);
     masterGain.gain.linearRampToValueAtTime(0.35, audioCtx.currentTime + 3);
 
     reverbNode = createReverb();
@@ -525,13 +531,17 @@
 
   // ---- Input handling ----
   const overlay = document.getElementById("start-overlay");
+  let started = false;
 
-  function handleStart(e) {
-    e.preventDefault();
+  function handleStart() {
+    if (started) return;
+    started = true;
+
     overlay.classList.add("hidden");
     setTimeout(() => overlay.style.display = "none", 1600);
 
-    // Init audio FIRST so the user gesture unlocks AudioContext
+    // Init audio inside the user gesture — do NOT preventDefault,
+    // as iOS Safari may not treat it as a user gesture otherwise.
     initAudio();
 
     running = true;
@@ -541,30 +551,32 @@
     const el = document.documentElement;
     if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
     else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-
-    // Switch to ongoing input handlers
-    document.removeEventListener("pointerdown", handleStart);
-    document.addEventListener("pointerdown", handleInteract);
   }
 
-  function handleInteract(e) {
-    e.preventDefault();
-    const x = e.clientX;
-    const y = e.clientY;
-    addTwinkle(x, y);
-    onTouch(x, y);
+  function handleInteract(px, py) {
+    addTwinkle(px, py);
+    onTouch(px, py);
   }
 
-  // Also handle multi-touch
-  document.addEventListener("touchstart", function (e) {
-    if (!running) return;
-    for (const touch of e.changedTouches) {
-      addTwinkle(touch.clientX, touch.clientY);
-      onTouch(touch.clientX, touch.clientY);
+  // Use touchend (most reliable for iOS Safari audio unlock) + click fallback
+  document.addEventListener("touchend", function (e) {
+    if (!started) {
+      handleStart();
+      return;
     }
-  }, { passive: true });
+    for (const touch of e.changedTouches) {
+      handleInteract(touch.clientX, touch.clientY);
+    }
+  }, false);
 
-  document.addEventListener("pointerdown", handleStart);
+  // Fallback for mouse / non-touch devices
+  document.addEventListener("click", function (e) {
+    if (!started) {
+      handleStart();
+      return;
+    }
+    handleInteract(e.clientX, e.clientY);
+  }, false);
 
 
 })();
