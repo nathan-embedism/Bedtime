@@ -373,13 +373,19 @@
 
   function initAudio() {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    // Mobile browsers require explicit resume inside a user gesture
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume();
+    }
+
     masterGain = audioCtx.createGain();
-    masterGain.gain.value = 0;
+    masterGain.gain.setValueAtTime(0, audioCtx.currentTime);
     masterGain.gain.linearRampToValueAtTime(0.35, audioCtx.currentTime + 3);
 
     reverbNode = createReverb();
     const reverbGain = audioCtx.createGain();
-    reverbGain.gain.value = 0.3;
+    reverbGain.gain.setValueAtTime(0.3, audioCtx.currentTime);
 
     masterGain.connect(audioCtx.destination);
     masterGain.connect(reverbNode);
@@ -397,7 +403,7 @@
     droneOsc.frequency.value = DRONE_NOTES[0];
 
     droneGain = audioCtx.createGain();
-    droneGain.gain.value = 0;
+    droneGain.gain.setValueAtTime(0, audioCtx.currentTime);
     droneGain.gain.linearRampToValueAtTime(0.12, audioCtx.currentTime + 4);
 
     // Gentle slow LFO for subtle vibrato
@@ -423,7 +429,7 @@
       osc.frequency.value = freq;
 
       const gain = audioCtx.createGain();
-      gain.gain.value = 0;
+      gain.gain.setValueAtTime(0, audioCtx.currentTime);
       gain.gain.linearRampToValueAtTime(0.04, audioCtx.currentTime + 5);
 
       osc.connect(gain);
@@ -484,6 +490,7 @@
   // ---- Touch interaction for music ----
   function onTouch(px, py) {
     if (!audioCtx) return;
+    if (audioCtx.state === "suspended") audioCtx.resume();
 
     // Map touch position to musical parameters
     const xNorm = px / window.innerWidth;   // 0 = left, 1 = right
@@ -524,9 +531,16 @@
     overlay.classList.add("hidden");
     setTimeout(() => overlay.style.display = "none", 1600);
 
+    // Init audio FIRST so the user gesture unlocks AudioContext
+    initAudio();
+
     running = true;
     requestAnimationFrame(frame);
-    initAudio();
+
+    // Try fullscreen AFTER audio is initialised
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
 
     // Switch to ongoing input handlers
     document.removeEventListener("pointerdown", handleStart);
@@ -552,13 +566,5 @@
 
   document.addEventListener("pointerdown", handleStart);
 
-  // ---- Fullscreen on first interaction (where supported) ----
-  function tryFullscreen() {
-    const el = document.documentElement;
-    if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
-    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-    document.removeEventListener("pointerdown", tryFullscreen);
-  }
-  document.addEventListener("pointerdown", tryFullscreen);
 
 })();
