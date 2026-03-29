@@ -126,10 +126,10 @@
         y: py * devicePixelRatio,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
-        r: rand(1.2, light ? 2.5 : 3.5),
+        r: rand(2.5, light ? 4.5 : 6),
         life: 1,
         decay: rand(decayLo, decayHi),
-        hue: rand(190, 280),
+        hue: rand(42, 55),
       });
     }
   }
