@@ -365,6 +365,7 @@
   }
 
   SCENES.bedtime = {
+    showTwinkles: true,
     init() {
       createStars();
       createClouds();
@@ -597,6 +598,7 @@
   }
 
   SCENES.beach = {
+    showTwinkles: false,
     init() {
       beachBubbles.length = 0;
       beachSandPuffs.length = 0;
@@ -831,6 +833,7 @@
   }
 
   SCENES.hills = {
+    showTwinkles: false,
     init() {
       createBirds();
       createBunnies();
@@ -1113,7 +1116,7 @@
     // Spawn light trailing twinkles along the swipe path (throttled by distance)
     const dx = px - state.lastTwinkleX;
     const dy = py - state.lastTwinkleY;
-    if (dx * dx + dy * dy > 1600) { // ~40px apart
+    if (dx * dx + dy * dy > 1600 && activeScene && activeScene.showTwinkles) { // ~40px apart
       addTwinkle(px, py, true);
       state.lastTwinkleX = px;
       state.lastTwinkleY = py;
@@ -1179,7 +1182,7 @@
   });
 
   function handleInteract(px, py) {
-    addTwinkle(px, py);
+    if (activeScene && activeScene.showTwinkles) addTwinkle(px, py);
     onTouch(px, py);
     if (activeScene && activeScene.onTap) {
       activeScene.onTap(px, py);
