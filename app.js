@@ -1063,6 +1063,19 @@
     }
   }
 
+  // Returns the y pixel position of the topmost green hill at screen x (in CSS pixels)
+  function getGreenHillTopY(pxX) {
+    const t = startTime !== null ? (performance.now() - startTime) / 1000 : 0;
+    const drift = t * 0.01;
+    const x = pxX * devicePixelRatio;
+    // Layer 0 is the topmost hill
+    const layer = 0;
+    const baseY = H * (0.52 + layer * 0.12);
+    const amp = H * (0.05 - layer * 0.008);
+    const freq = 0.0015 + layer * 0.0005;
+    return hillY(x, layer * 50 + drift * (layer + 1) * 3, baseY, amp, freq) / devicePixelRatio;
+  }
+
   SCENES.hills = {
     showTwinkles: false,
     init() {
@@ -1084,11 +1097,12 @@
       updateHillWorms();
     },
     onTap(px, py) {
-      const yNorm = py / window.innerHeight;
-      if (yNorm > 0.45) {
+      const hillTop = getGreenHillTopY(px);
+      if (py >= hillTop) {
         spawnWorm(px, py);
+      } else {
+        spawnButterfly(px, py);
       }
-      spawnButterfly(px, py);
     },
     onResize() {
       // birds/bunnies use normalized coords, so nothing needed
