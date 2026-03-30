@@ -394,6 +394,7 @@
   const beachBubbles = [];
   const beachSandPuffs = [];
   const beachTappedClouds = [];
+  const beachCrabs = [];
   let beachSun = { x: 0.82, y: 0.12, r: 0, glowR: 0 };
 
   function sizeBeachSun() {
@@ -597,12 +598,85 @@
     });
   }
 
+  function spawnBeachCrab(px, py) {
+    const dir = (px < window.innerWidth / 2) ? -1 : 1; // run toward nearest edge
+    beachCrabs.push({
+      x: px * devicePixelRatio,
+      y: py * devicePixelRatio,
+      vx: dir * rand(2, 4.5) * devicePixelRatio,
+      size: rand(8, 14) * devicePixelRatio,
+      legPhase: rand(0, Math.PI * 2),
+      hue: rand(10, 25), // orange-red
+    });
+  }
+
+  function drawBeachCrabs(t) {
+    for (const c of beachCrabs) {
+      const s = c.size;
+      const legWiggle = Math.sin(t * 18 + c.legPhase) * s * 0.2;
+
+      // Body (oval)
+      ctx.fillStyle = `hsl(${c.hue}, 65%, 45%)`;
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, s * 0.6, s * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Legs (3 per side)
+      ctx.strokeStyle = `hsl(${c.hue}, 60%, 40%)`;
+      ctx.lineWidth = Math.max(1, s * 0.08);
+      ctx.lineCap = "round";
+      for (let side = -1; side <= 1; side += 2) {
+        for (let i = 0; i < 3; i++) {
+          const lx = c.x + side * s * (0.3 + i * 0.15);
+          const ly = c.y + s * 0.25;
+          const wiggle = (i % 2 === 0 ? legWiggle : -legWiggle);
+          ctx.beginPath();
+          ctx.moveTo(lx, ly);
+          ctx.lineTo(lx + side * s * 0.25, ly + s * 0.3 + wiggle);
+          ctx.stroke();
+        }
+      }
+
+      // Claws
+      ctx.fillStyle = `hsl(${c.hue}, 55%, 50%)`;
+      const clawDir = c.vx > 0 ? 1 : -1;
+      for (let side = -1; side <= 1; side += 2) {
+        const cx = c.x + side * s * 0.55;
+        const cy = c.y - s * 0.15;
+        ctx.beginPath();
+        ctx.ellipse(cx + clawDir * s * 0.1, cy, s * 0.18, s * 0.12, side * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Eyes (two small dots on stalks)
+      ctx.fillStyle = "#222";
+      ctx.beginPath();
+      ctx.arc(c.x - s * 0.18, c.y - s * 0.35, s * 0.07, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(c.x + s * 0.18, c.y - s * 0.35, s * 0.07, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function updateBeachCrabs() {
+    for (let i = beachCrabs.length - 1; i >= 0; i--) {
+      const c = beachCrabs[i];
+      c.x += c.vx;
+      // Remove once off screen
+      if (c.x < -c.size * 2 || c.x > W + c.size * 2) {
+        beachCrabs.splice(i, 1);
+      }
+    }
+  }
+
   SCENES.beach = {
     showTwinkles: false,
     init() {
       beachBubbles.length = 0;
       beachSandPuffs.length = 0;
       beachTappedClouds.length = 0;
+      beachCrabs.length = 0;
       sizeBeachSun();
     },
     draw(t) {
@@ -610,12 +684,14 @@
       drawBeachSun();
       drawBeachTappedClouds();
       drawBeachSand();
+      drawBeachCrabs(t);
       drawBeachSea(t);
       drawBeachBubbles();
       drawBeachSandPuffs();
     },
     update(t) {
       updateBeachParticles();
+      updateBeachCrabs();
     },
     onTap(px, py) {
       const yNorm = py / window.innerHeight;
@@ -623,6 +699,7 @@
         spawnBeachCloud(px, py);
       } else if (yNorm < BEACH_SAND_END) {
         spawnBeachSandPuff(px, py);
+        spawnBeachCrab(px, py);
       } else {
         spawnBeachBubbles(px, py);
       }
