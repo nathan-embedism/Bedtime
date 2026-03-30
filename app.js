@@ -986,24 +986,108 @@
     });
   }
 
+  // Worms that pop out of grass and wiggle back in
+  const hillWorms = [];
+
+  function spawnWorm(px, py) {
+    hillWorms.push({
+      x: px * devicePixelRatio,
+      groundY: py * devicePixelRatio,
+      phase: 0,            // 0→1: popping up, 1→2: wiggling, 2→3: going back in
+      timer: 0,
+      riseHeight: rand(25, 45) * devicePixelRatio,
+      size: rand(3, 5) * devicePixelRatio,
+      wiggleSpeed: rand(10, 16),
+      hue: rand(320, 360),  // pink-ish worm
+    });
+  }
+
+  function drawHillWorms(t) {
+    for (const w of hillWorms) {
+      // How far out of the ground (0 to 1 to 0)
+      let emerge;
+      if (w.timer < 0.3) {
+        emerge = w.timer / 0.3; // rising
+      } else if (w.timer < 0.7) {
+        emerge = 1; // fully out, wiggling
+      } else {
+        emerge = 1 - (w.timer - 0.7) / 0.3; // going back in
+      }
+      emerge = clamp(emerge, 0, 1);
+
+      const visibleH = w.riseHeight * emerge;
+      if (visibleH < 1) continue;
+
+      const segments = 8;
+      const segH = visibleH / segments;
+
+      ctx.lineWidth = w.size;
+      ctx.lineCap = "round";
+      ctx.strokeStyle = `hsl(${w.hue}, 45%, 55%)`;
+
+      ctx.beginPath();
+      for (let i = 0; i <= segments; i++) {
+        const sy = w.groundY - i * segH;
+        const wiggle = Math.sin(t * w.wiggleSpeed + i * 0.8) * w.size * 1.5 * (i / segments);
+        if (i === 0) ctx.moveTo(w.x + wiggle, sy);
+        else ctx.lineTo(w.x + wiggle, sy);
+      }
+      ctx.stroke();
+
+      // Little head at the top
+      const topY = w.groundY - visibleH;
+      const topWiggle = Math.sin(t * w.wiggleSpeed + segments * 0.8) * w.size * 1.5;
+      ctx.fillStyle = `hsl(${w.hue}, 40%, 50%)`;
+      ctx.beginPath();
+      ctx.arc(w.x + topWiggle, topY, w.size * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eyes
+      ctx.fillStyle = "#222";
+      ctx.beginPath();
+      ctx.arc(w.x + topWiggle - w.size * 0.25, topY - w.size * 0.15, w.size * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(w.x + topWiggle + w.size * 0.25, topY - w.size * 0.15, w.size * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function updateHillWorms() {
+    for (let i = hillWorms.length - 1; i >= 0; i--) {
+      const w = hillWorms[i];
+      w.timer += 0.008;
+      if (w.timer >= 1) {
+        hillWorms.splice(i, 1);
+      }
+    }
+  }
+
   SCENES.hills = {
     showTwinkles: false,
     init() {
       createBirds();
       createBunnies();
       hillButterflies.length = 0;
+      hillWorms.length = 0;
     },
     draw(t) {
       drawHillsSky();
       drawBirds(t);
       drawGreenHills(t);
+      drawHillWorms(t);
       drawBunnies(t);
       drawHillButterflies(t);
     },
     update(t) {
       updateHillsEntities(t);
+      updateHillWorms();
     },
     onTap(px, py) {
+      const yNorm = py / window.innerHeight;
+      if (yNorm > 0.45) {
+        spawnWorm(px, py);
+      }
       spawnButterfly(px, py);
     },
     onResize() {
