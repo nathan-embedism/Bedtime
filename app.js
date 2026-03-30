@@ -15,13 +15,36 @@
     H = canvas.height = window.innerHeight * devicePixelRatio;
     ctx.scale(1, 1); // reset
   }
-  window.addEventListener("resize", resize);
+  function onResize() {
+    resize();
+    if (activeScene && activeScene.onResize) activeScene.onResize();
+  }
+  window.addEventListener("resize", onResize);
   resize();
 
   // ---- Utility ----
   function rand(a, b) { return a + Math.random() * (b - a); }
   function lerp(a, b, t) { return a + (b - a) * t; }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  // ---- Shared: hillY (used by bedtime + hills scenes) ----
+  function hillY(x, seed, baseY, amp, freq) {
+    return baseY
+      + Math.sin(x * freq + seed) * amp
+      + Math.sin(x * freq * 2.3 + seed * 1.7) * amp * 0.4
+      + Math.sin(x * freq * 0.6 + seed * 0.3) * amp * 0.6;
+  }
+
+  // ---- Scene orchestrator ----
+  const SCENES = {};
+  let activeScene = null;
+
+  function startScene(name) {
+    twinkles.length = 0;
+    activeScene = SCENES[name];
+    activeScene.init();
+    if (activeScene.onResize) activeScene.onResize();
+  }
 
   // ---- Colour palette ----
   const SKY_TOP    = [8, 12, 28];
@@ -48,8 +71,6 @@
       });
     }
   }
-  createStars();
-
   // ---- Shooting stars ----
   const shootingStars = [];
   function maybeSpawnShootingStar() {
@@ -72,18 +93,6 @@
     moon.r = Math.min(W, H) * 0.045;
     moon.glowR = moon.r * 3.5;
   }
-  sizeMoon();
-  window.addEventListener("resize", sizeMoon);
-
-  // ---- Rolling hills (vector) ----
-  function hillY(x, seed, baseY, amp, freq) {
-    // Simple layered sine hills
-    return baseY
-      + Math.sin(x * freq + seed) * amp
-      + Math.sin(x * freq * 2.3 + seed * 1.7) * amp * 0.4
-      + Math.sin(x * freq * 0.6 + seed * 0.3) * amp * 0.6;
-  }
-
   // ---- Clouds ----
   const CLOUD_COUNT = 5;
   const clouds = [];
@@ -100,8 +109,6 @@
       });
     }
   }
-  createClouds();
-
   // ---- Touch twinkles ----
   const MAX_TWINKLES = 120;
   const twinkles = [];
@@ -151,7 +158,7 @@
       });
     }
   }
-  createFireflies();
+
 
   // ---- Drawing ----
   function drawSky(t) {
@@ -315,16 +322,7 @@
     ctx.globalAlpha = 1;
   }
 
-  function updateParticles() {
-    // shooting stars
-    for (let i = shootingStars.length - 1; i >= 0; i--) {
-      const s = shootingStars[i];
-      s.x += s.vx;
-      s.y += s.vy;
-      s.life -= s.decay;
-      if (s.life <= 0) shootingStars.splice(i, 1);
-    }
-    // twinkles
+  function updateTwinkleParticles() {
     for (let i = twinkles.length - 1; i >= 0; i--) {
       const p = twinkles[i];
       p.x += p.vx;
@@ -344,20 +342,517 @@
     if (!startTime) startTime = ts;
     const t = (ts - startTime) / 1000;
 
-    drawSky(t);
-    drawMoon(t);
-    drawStars(t);
-    drawShootingStars();
-    drawClouds(t);
-    drawHills(t);
-    drawFireflies(t);
-    drawTwinkles();
+    if (activeScene) {
+      activeScene.draw(t);
+      activeScene.update(t);
+    }
 
-    updateParticles();
-    maybeSpawnShootingStar();
+    drawTwinkles();
+    updateTwinkleParticles();
 
     if (running) requestAnimationFrame(frame);
   }
+
+  // ==== SCENE: Bedtime ====
+  function updateBedtimeShootingStars() {
+    for (let i = shootingStars.length - 1; i >= 0; i--) {
+      const s = shootingStars[i];
+      s.x += s.vx;
+      s.y += s.vy;
+      s.life -= s.decay;
+      if (s.life <= 0) shootingStars.splice(i, 1);
+    }
+  }
+
+  SCENES.bedtime = {
+    init() {
+      createStars();
+      createClouds();
+      createFireflies();
+      sizeMoon();
+      shootingStars.length = 0;
+    },
+    draw(t) {
+      drawSky(t);
+      drawMoon(t);
+      drawStars(t);
+      drawShootingStars();
+      drawClouds(t);
+      drawHills(t);
+      drawFireflies(t);
+    },
+    update(t) {
+      updateBedtimeShootingStars();
+      maybeSpawnShootingStar();
+    },
+    onTap(px, py) { /* shared twinkle + music is sufficient */ },
+    onResize() { sizeMoon(); },
+  };
+
+  // ==== SCENE: Beach ====
+  const beachBubbles = [];
+  const beachSandPuffs = [];
+  const beachTappedClouds = [];
+  let beachSun = { x: 0.82, y: 0.12, r: 0, glowR: 0 };
+
+  function sizeBeachSun() {
+    beachSun.r = Math.min(W, H) * 0.04;
+    beachSun.glowR = beachSun.r * 4;
+  }
+
+  // Beach zone boundaries (fraction of screen height)
+  const BEACH_SKY_END = 0.55;   // sky occupies top 55%
+  const BEACH_SAND_END = 0.65;  // sand strip 55%-65%
+  // sea occupies 65%-100%
+
+  function drawBeachSky() {
+    const grad = ctx.createLinearGradient(0, 0, 0, H * BEACH_SKY_END);
+    grad.addColorStop(0, "#4a90d9");
+    grad.addColorStop(0.7, "#87CEEB");
+    grad.addColorStop(1, "#B0E0E6");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H * BEACH_SKY_END);
+  }
+
+  function drawBeachSun() {
+    const sx = beachSun.x * W;
+    const sy = beachSun.y * H;
+    const glowGrad = ctx.createRadialGradient(sx, sy, beachSun.r * 0.3, sx, sy, beachSun.glowR);
+    glowGrad.addColorStop(0, "rgba(255, 240, 150, 0.25)");
+    glowGrad.addColorStop(0.4, "rgba(255, 220, 100, 0.08)");
+    glowGrad.addColorStop(1, "rgba(255, 220, 100, 0)");
+    ctx.fillStyle = glowGrad;
+    ctx.beginPath();
+    ctx.arc(sx, sy, beachSun.glowR, 0, Math.PI * 2);
+    ctx.fill();
+    const discGrad = ctx.createRadialGradient(sx - beachSun.r * 0.2, sy - beachSun.r * 0.2, 0, sx, sy, beachSun.r);
+    discGrad.addColorStop(0, "rgba(255, 250, 200, 0.98)");
+    discGrad.addColorStop(1, "rgba(255, 220, 120, 0.92)");
+    ctx.fillStyle = discGrad;
+    ctx.beginPath();
+    ctx.arc(sx, sy, beachSun.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawBeachSand() {
+    const y0 = H * BEACH_SKY_END;
+    const y1 = H * BEACH_SAND_END;
+    const grad = ctx.createLinearGradient(0, y0, 0, y1);
+    grad.addColorStop(0, "#f0dca0");
+    grad.addColorStop(1, "#e8cc88");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, y0, W, y1 - y0);
+  }
+
+  function drawBeachSea(t) {
+    const seaTop = H * BEACH_SAND_END;
+    // base sea fill
+    const grad = ctx.createLinearGradient(0, seaTop, 0, H);
+    grad.addColorStop(0, "#3ab5c4");
+    grad.addColorStop(0.4, "#2196a8");
+    grad.addColorStop(1, "#1a6e80");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, seaTop, W, H - seaTop);
+
+    // animated wave layers
+    for (let layer = 0; layer < 3; layer++) {
+      const baseY = seaTop + layer * (H - seaTop) * 0.15;
+      const amp = H * 0.008;
+      const freq = 0.005 + layer * 0.002;
+      const speed = 0.8 + layer * 0.3;
+      const alpha = 0.12 - layer * 0.03;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.moveTo(0, H);
+      for (let x = 0; x <= W; x += 4) {
+        const y = baseY + Math.sin(x * freq + t * speed) * amp
+                        + Math.sin(x * freq * 1.7 + t * speed * 0.6) * amp * 0.5;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(W, H);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawBeachBubbles() {
+    for (const b of beachBubbles) {
+      ctx.globalAlpha = b.life * 0.6;
+      ctx.strokeStyle = `rgba(180, 230, 255, 0.7)`;
+      ctx.lineWidth = 1.5 * devicePixelRatio;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.stroke();
+      // highlight
+      ctx.globalAlpha = b.life * 0.3;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(b.x - b.r * 0.25, b.y - b.r * 0.25, b.r * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawBeachSandPuffs() {
+    for (const p of beachSandPuffs) {
+      ctx.globalAlpha = p.life * 0.5;
+      ctx.fillStyle = "#d4b876";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawBeachTappedClouds() {
+    for (const c of beachTappedClouds) {
+      ctx.globalAlpha = c.life * 0.35;
+      ctx.fillStyle = "#fff";
+      const w = c.w;
+      const h = c.h;
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, w * 0.5, h, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(c.x - w * 0.25, c.y + h * 0.2, w * 0.33, h * 0.8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(c.x + w * 0.28, c.y + h * 0.15, w * 0.36, h * 0.75, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function updateBeachParticles() {
+    for (let i = beachBubbles.length - 1; i >= 0; i--) {
+      const b = beachBubbles[i];
+      b.x += b.vx;
+      b.y += b.vy;
+      b.vx += rand(-0.05, 0.05); // wobble
+      b.life -= b.decay;
+      if (b.life <= 0) beachBubbles.splice(i, 1);
+    }
+    for (let i = beachSandPuffs.length - 1; i >= 0; i--) {
+      const p = beachSandPuffs[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy -= 0.02; // rise slightly
+      p.vx *= 0.97;
+      p.r *= 1.01; // expand
+      p.life -= p.decay;
+      if (p.life <= 0) beachSandPuffs.splice(i, 1);
+    }
+    for (let i = beachTappedClouds.length - 1; i >= 0; i--) {
+      const c = beachTappedClouds[i];
+      c.x += c.vx;
+      c.life -= c.decay;
+      if (c.life <= 0) beachTappedClouds.splice(i, 1);
+    }
+  }
+
+  function spawnBeachBubbles(px, py) {
+    const count = Math.floor(rand(5, 10));
+    for (let i = 0; i < count; i++) {
+      beachBubbles.push({
+        x: px * devicePixelRatio + rand(-15, 15),
+        y: py * devicePixelRatio + rand(-10, 10),
+        vx: rand(-0.3, 0.3),
+        vy: rand(-1.5, -0.5),
+        r: rand(3, 8) * devicePixelRatio,
+        life: 1,
+        decay: rand(0.006, 0.015),
+      });
+    }
+  }
+
+  function spawnBeachSandPuff(px, py) {
+    const count = Math.floor(rand(8, 14));
+    for (let i = 0; i < count; i++) {
+      const angle = rand(0, Math.PI * 2);
+      const speed = rand(0.5, 2);
+      beachSandPuffs.push({
+        x: px * devicePixelRatio,
+        y: py * devicePixelRatio,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 0.5,
+        r: rand(2, 5) * devicePixelRatio,
+        life: 1,
+        decay: rand(0.015, 0.035),
+      });
+    }
+  }
+
+  function spawnBeachCloud(px, py) {
+    beachTappedClouds.push({
+      x: px * devicePixelRatio,
+      y: py * devicePixelRatio,
+      w: rand(40, 80) * devicePixelRatio,
+      h: rand(8, 16) * devicePixelRatio,
+      vx: rand(0.1, 0.4) * (Math.random() < 0.5 ? 1 : -1),
+      life: 1,
+      decay: rand(0.001, 0.003),
+    });
+  }
+
+  SCENES.beach = {
+    init() {
+      beachBubbles.length = 0;
+      beachSandPuffs.length = 0;
+      beachTappedClouds.length = 0;
+      sizeBeachSun();
+    },
+    draw(t) {
+      drawBeachSky();
+      drawBeachSun();
+      drawBeachTappedClouds();
+      drawBeachSand();
+      drawBeachSea(t);
+      drawBeachBubbles();
+      drawBeachSandPuffs();
+    },
+    update(t) {
+      updateBeachParticles();
+    },
+    onTap(px, py) {
+      const yNorm = py / window.innerHeight;
+      if (yNorm < BEACH_SKY_END) {
+        spawnBeachCloud(px, py);
+      } else if (yNorm < BEACH_SAND_END) {
+        spawnBeachSandPuff(px, py);
+      } else {
+        spawnBeachBubbles(px, py);
+      }
+    },
+    onResize() { sizeBeachSun(); },
+  };
+
+  // ==== SCENE: Hills ====
+  const GREEN_HILL_COLORS = [
+    [55, 160, 60],
+    [45, 140, 50],
+    [35, 115, 42],
+  ];
+  const hillBirds = [];
+  const hillBunnies = [];
+  const hillButterflies = [];
+
+  function createBirds() {
+    hillBirds.length = 0;
+    for (let i = 0; i < 6; i++) {
+      hillBirds.push({
+        x: rand(0, 1),
+        y: rand(0.08, 0.35),
+        speed: rand(0.01, 0.025),
+        flapSpeed: rand(3, 6),
+        flapPhase: rand(0, Math.PI * 2),
+        size: rand(6, 12) * devicePixelRatio,
+        bobPhase: rand(0, Math.PI * 2),
+        bobAmp: rand(0.005, 0.015),
+      });
+    }
+  }
+
+  function createBunnies() {
+    hillBunnies.length = 0;
+    for (let i = 0; i < 4; i++) {
+      hillBunnies.push({
+        x: rand(0.1, 0.9),
+        layer: Math.floor(rand(0, 3)),
+        earPhase: rand(0, Math.PI * 2),
+        earSpeed: rand(1.5, 3),
+        size: rand(8, 14) * devicePixelRatio,
+      });
+    }
+  }
+
+  function drawHillsSky() {
+    const grad = ctx.createLinearGradient(0, 0, 0, H * 0.6);
+    grad.addColorStop(0, "#3a7bd5");
+    grad.addColorStop(0.6, "#6db3f2");
+    grad.addColorStop(1, "#a8d8ea");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawGreenHills(t) {
+    const drift = t * 0.01;
+    for (let layer = 0; layer < 3; layer++) {
+      const baseY = H * (0.52 + layer * 0.12);
+      const amp = H * (0.05 - layer * 0.008);
+      const freq = 0.0015 + layer * 0.0005;
+      const col = GREEN_HILL_COLORS[layer];
+      ctx.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
+      ctx.beginPath();
+      ctx.moveTo(0, H);
+      for (let x = 0; x <= W; x += 4) {
+        const y = hillY(x, layer * 50 + drift * (layer + 1) * 3, baseY, amp, freq);
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(W, H);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  function drawBirds(t) {
+    ctx.strokeStyle = "#2a3a50";
+    ctx.lineWidth = 2 * devicePixelRatio;
+    ctx.lineCap = "round";
+    for (const b of hillBirds) {
+      const bx = b.x * W;
+      const by = (b.y + Math.sin(t * 0.5 + b.bobPhase) * b.bobAmp) * H;
+      const wingAngle = Math.sin(t * b.flapSpeed + b.flapPhase) * 0.5;
+      const s = b.size;
+      ctx.beginPath();
+      ctx.moveTo(bx - s, by + wingAngle * s);
+      ctx.quadraticCurveTo(bx - s * 0.3, by - Math.abs(wingAngle) * s * 0.3, bx, by);
+      ctx.quadraticCurveTo(bx + s * 0.3, by - Math.abs(wingAngle) * s * 0.3, bx + s, by + wingAngle * s);
+      ctx.stroke();
+    }
+  }
+
+  function getBunnyHillY(bunny, t) {
+    const drift = t * 0.01;
+    const layer = bunny.layer;
+    const baseY = H * (0.52 + layer * 0.12);
+    const amp = H * (0.05 - layer * 0.008);
+    const freq = 0.0015 + layer * 0.0005;
+    return hillY(bunny.x * W, layer * 50 + drift * (layer + 1) * 3, baseY, amp, freq);
+  }
+
+  function drawBunnies(t) {
+    for (const b of hillBunnies) {
+      const bx = b.x * W;
+      const by = getBunnyHillY(b, t);
+      const s = b.size;
+      const earTwitch = Math.sin(t * b.earSpeed + b.earPhase) * 0.15;
+
+      // Body (oval)
+      ctx.fillStyle = "#c8b898";
+      ctx.beginPath();
+      ctx.ellipse(bx, by - s * 0.4, s * 0.5, s * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Head
+      ctx.beginPath();
+      ctx.arc(bx, by - s * 1.0, s * 0.32, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Ears
+      ctx.fillStyle = "#c8b898";
+      // Left ear
+      ctx.beginPath();
+      ctx.ellipse(bx - s * 0.15, by - s * 1.55, s * 0.1, s * 0.3, -0.15 + earTwitch, 0, Math.PI * 2);
+      ctx.fill();
+      // Right ear
+      ctx.beginPath();
+      ctx.ellipse(bx + s * 0.15, by - s * 1.55, s * 0.1, s * 0.3, 0.15 - earTwitch, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Inner ears (pink)
+      ctx.fillStyle = "#e8b8b0";
+      ctx.beginPath();
+      ctx.ellipse(bx - s * 0.15, by - s * 1.55, s * 0.05, s * 0.2, -0.15 + earTwitch, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(bx + s * 0.15, by - s * 1.55, s * 0.05, s * 0.2, 0.15 - earTwitch, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Tail (small circle)
+      ctx.fillStyle = "#e8e0d8";
+      ctx.beginPath();
+      ctx.arc(bx - s * 0.45, by - s * 0.25, s * 0.15, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eye
+      ctx.fillStyle = "#333";
+      ctx.beginPath();
+      ctx.arc(bx + s * 0.1, by - s * 1.05, s * 0.06, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawHillButterflies(t) {
+    for (const bf of hillButterflies) {
+      const wingFlap = Math.sin(t * 8 + bf.phase) * 0.7;
+      ctx.globalAlpha = bf.life;
+      ctx.fillStyle = `hsl(${bf.hue}, 70%, 70%)`;
+
+      // Left wing
+      ctx.beginPath();
+      ctx.ellipse(bf.x - bf.size * 0.4, bf.y, bf.size * 0.5, bf.size * 0.3 * Math.abs(Math.cos(wingFlap)), 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Right wing
+      ctx.beginPath();
+      ctx.ellipse(bf.x + bf.size * 0.4, bf.y, bf.size * 0.5, bf.size * 0.3 * Math.abs(Math.cos(wingFlap)), 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Body
+      ctx.fillStyle = "#555";
+      ctx.beginPath();
+      ctx.ellipse(bf.x, bf.y, bf.size * 0.08, bf.size * 0.25, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function updateHillsEntities(t) {
+    // birds drift across screen
+    for (const b of hillBirds) {
+      b.x += b.speed * (1 / 60);
+      if (b.x > 1.1) b.x = -0.1;
+    }
+    // butterflies flutter upward and fade
+    for (let i = hillButterflies.length - 1; i >= 0; i--) {
+      const bf = hillButterflies[i];
+      bf.x += bf.vx;
+      bf.y += bf.vy;
+      bf.vx += rand(-0.15, 0.15);
+      bf.vx *= 0.95;
+      bf.life -= bf.decay;
+      if (bf.life <= 0) hillButterflies.splice(i, 1);
+    }
+  }
+
+  function spawnButterfly(px, py) {
+    hillButterflies.push({
+      x: px * devicePixelRatio,
+      y: py * devicePixelRatio,
+      vx: rand(-0.5, 0.5),
+      vy: rand(-1.2, -0.4),
+      size: rand(8, 16) * devicePixelRatio,
+      phase: rand(0, Math.PI * 2),
+      hue: rand(280, 340),
+      life: 1,
+      decay: rand(0.004, 0.01),
+    });
+  }
+
+  SCENES.hills = {
+    init() {
+      createBirds();
+      createBunnies();
+      hillButterflies.length = 0;
+    },
+    draw(t) {
+      drawHillsSky();
+      drawBirds(t);
+      drawGreenHills(t);
+      drawBunnies(t);
+      drawHillButterflies(t);
+    },
+    update(t) {
+      updateHillsEntities(t);
+    },
+    onTap(px, py) {
+      spawnButterfly(px, py);
+    },
+    onResize() {
+      // birds/bunnies use normalized coords, so nothing needed
+    },
+  };
 
   // ============================================================
   //  MUSIC ENGINE – gentle generative lullaby
@@ -637,31 +1132,58 @@
 
   // ---- Input handling ----
   const overlay = document.getElementById("start-overlay");
+  const picker = document.getElementById("scene-picker");
   let started = false;
+  let pickerOpen = false;
 
+  // Step 1: tap start overlay → show scene picker
   function handleStart() {
-    if (started) return;
-    started = true;
+    if (pickerOpen || started) return;
+    pickerOpen = true;
 
     overlay.classList.add("hidden");
     setTimeout(() => overlay.style.display = "none", 1600);
 
-    // Init audio inside the user gesture — do NOT preventDefault,
-    // as iOS Safari may not treat it as a user gesture otherwise.
-    initAudio();
-
-    running = true;
-    requestAnimationFrame(frame);
-
-    // Try fullscreen AFTER audio is initialised
-    const el = document.documentElement;
-    if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
-    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    picker.classList.add("visible");
   }
+
+  // Step 2: pick a scene → init audio + start
+  document.querySelectorAll(".scene-btn").forEach(function(btn) {
+    btn.addEventListener("click", function(e) {
+      e.stopPropagation();
+      if (started) return;
+      started = true;
+
+      const sceneName = btn.getAttribute("data-scene");
+
+      picker.classList.add("hidden");
+      setTimeout(() => picker.style.display = "none", 1600);
+
+      // Init audio inside THIS user gesture
+      initAudio();
+
+      startScene(sceneName);
+      running = true;
+      requestAnimationFrame(frame);
+
+      // Try fullscreen
+      const el = document.documentElement;
+      if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    });
+    // Also handle touch for mobile
+    btn.addEventListener("touchend", function(e) {
+      e.stopPropagation();
+      btn.click();
+    }, { passive: false });
+  });
 
   function handleInteract(px, py) {
     addTwinkle(px, py);
     onTouch(px, py);
+    if (activeScene && activeScene.onTap) {
+      activeScene.onTap(px, py);
+    }
   }
 
   // ---- Touch events (primary — handles taps + swipes + multi-touch) ----
