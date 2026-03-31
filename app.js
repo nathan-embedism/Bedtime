@@ -396,6 +396,7 @@
   const beachTappedClouds = [];
   const beachCrabs = [];
   const beachFish = [];
+  const beachSandIndents = [];
   let beachSun = { x: 0.82, y: 0.12, r: 0, glowR: 0 };
 
   function sizeBeachSun() {
@@ -509,6 +510,32 @@
     ctx.globalAlpha = 1;
   }
 
+  function drawBeachSandIndents() {
+    for (const d of beachSandIndents) {
+      ctx.globalAlpha = d.life * 0.4;
+      // Darker sand depression
+      ctx.fillStyle = "#c4a860";
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y, d.r * 1.2, d.r * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Lighter rim highlight on top edge
+      ctx.globalAlpha = d.life * 0.25;
+      ctx.fillStyle = "#f0dca0";
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y - d.r * 0.25, d.r * 1.0, d.r * 0.25, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function updateBeachSandIndents() {
+    for (let i = beachSandIndents.length - 1; i >= 0; i--) {
+      const d = beachSandIndents[i];
+      d.life -= d.decay;
+      if (d.life <= 0) beachSandIndents.splice(i, 1);
+    }
+  }
+
   function drawBeachTappedClouds() {
     for (const c of beachTappedClouds) {
       ctx.globalAlpha = c.life * 0.35;
@@ -605,7 +632,7 @@
       x: px * devicePixelRatio,
       y: py * devicePixelRatio,
       vx: dir * rand(2, 4.5) * devicePixelRatio,
-      size: rand(8, 14) * devicePixelRatio,
+      size: rand(12, 21) * devicePixelRatio,
       legPhase: rand(0, Math.PI * 2),
       hue: rand(10, 25), // orange-red
     });
@@ -677,7 +704,7 @@
       y: py * devicePixelRatio,
       vx: dir * rand(1.5, 3.5) * devicePixelRatio,
       vy: rand(-0.3, 0.3) * devicePixelRatio,
-      size: rand(10, 18) * devicePixelRatio,
+      size: rand(15, 27) * devicePixelRatio,
       tailPhase: rand(0, Math.PI * 2),
       hue: rand(180, 50), // tropical colours: teal, orange, yellow
       dir: dir,
@@ -751,6 +778,7 @@
       beachTappedClouds.length = 0;
       beachCrabs.length = 0;
       beachFish.length = 0;
+      beachSandIndents.length = 0;
       sizeBeachSun();
     },
     draw(t) {
@@ -758,6 +786,7 @@
       drawBeachSun();
       drawBeachTappedClouds();
       drawBeachSand();
+      drawBeachSandIndents();
       drawBeachCrabs(t);
       drawBeachSea(t);
       drawBeachFish(t);
@@ -768,6 +797,7 @@
       updateBeachParticles();
       updateBeachCrabs();
       updateBeachFish();
+      updateBeachSandIndents();
     },
     onTap(px, py) {
       const yNorm = py / window.innerHeight;
@@ -779,6 +809,30 @@
       } else {
         spawnBeachBubbles(px, py);
         spawnBeachFish(px, py);
+      }
+    },
+    onSwipe(px, py) {
+      const yNorm = py / window.innerHeight;
+      if (yNorm >= BEACH_SAND_END) {
+        // Water: small trail bubble
+        beachBubbles.push({
+          x: px * devicePixelRatio + rand(-5, 5),
+          y: py * devicePixelRatio,
+          vx: rand(-0.2, 0.2),
+          vy: rand(-1.0, -0.3),
+          r: rand(2, 5) * devicePixelRatio,
+          life: 1,
+          decay: rand(0.01, 0.025),
+        });
+      } else if (yNorm >= BEACH_SKY_END) {
+        // Sand: indent
+        beachSandIndents.push({
+          x: px * devicePixelRatio,
+          y: py * devicePixelRatio,
+          r: rand(4, 8) * devicePixelRatio,
+          life: 1,
+          decay: rand(0.003, 0.008),
+        });
       }
     },
     onResize() { sizeBeachSun(); },
@@ -793,6 +847,8 @@
   const hillBirds = [];
   const hillBunnies = [];
   const hillButterflies = [];
+  const hillGrassBlades = [];
+  const hillTrailClouds = [];
 
   function createBirds() {
     hillBirds.length = 0;
@@ -995,8 +1051,8 @@
       groundY: py * devicePixelRatio,
       phase: 0,            // 0→1: popping up, 1→2: wiggling, 2→3: going back in
       timer: 0,
-      riseHeight: rand(25, 45) * devicePixelRatio,
-      size: rand(3, 5) * devicePixelRatio,
+      riseHeight: rand(38, 68) * devicePixelRatio,
+      size: rand(4.5, 7.5) * devicePixelRatio,
       wiggleSpeed: rand(10, 16),
       hue: rand(320, 360),  // pink-ish worm
     });
@@ -1076,6 +1132,53 @@
     return hillY(x, layer * 50 + drift * (layer + 1) * 3, baseY, amp, freq) / devicePixelRatio;
   }
 
+  function drawHillGrassBlades(t) {
+    for (const g of hillGrassBlades) {
+      const sway = Math.sin(t * 3 + g.phase) * 0.15;
+      ctx.globalAlpha = g.life;
+      ctx.strokeStyle = g.color;
+      ctx.lineWidth = g.w;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(g.x, g.y);
+      ctx.quadraticCurveTo(g.x + sway * g.h, g.y - g.h * 0.6, g.x + sway * g.h * 1.5, g.y - g.h);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawHillTrailClouds() {
+    for (const c of hillTrailClouds) {
+      ctx.globalAlpha = c.life * 0.3;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, c.w, c.h, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(c.x - c.w * 0.4, c.y + c.h * 0.15, c.w * 0.6, c.h * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(c.x + c.w * 0.45, c.y + c.h * 0.1, c.w * 0.55, c.h * 0.65, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function updateHillTrails() {
+    for (let i = hillGrassBlades.length - 1; i >= 0; i--) {
+      const g = hillGrassBlades[i];
+      g.life -= g.decay;
+      if (g.life <= 0) hillGrassBlades.splice(i, 1);
+    }
+    for (let i = hillTrailClouds.length - 1; i >= 0; i--) {
+      const c = hillTrailClouds[i];
+      c.x += c.vx;
+      c.y += c.vy;
+      c.life -= c.decay;
+      if (c.life <= 0) hillTrailClouds.splice(i, 1);
+    }
+  }
+
   SCENES.hills = {
     showTwinkles: false,
     init() {
@@ -1083,11 +1186,15 @@
       createBunnies();
       hillButterflies.length = 0;
       hillWorms.length = 0;
+      hillGrassBlades.length = 0;
+      hillTrailClouds.length = 0;
     },
     draw(t) {
       drawHillsSky();
+      drawHillTrailClouds();
       drawBirds(t);
       drawGreenHills(t);
+      drawHillGrassBlades(t);
       drawHillWorms(t);
       drawBunnies(t);
       drawHillButterflies(t);
@@ -1095,6 +1202,7 @@
     update(t) {
       updateHillsEntities(t);
       updateHillWorms();
+      updateHillTrails();
     },
     onTap(px, py) {
       const hillTop = getGreenHillTopY(px);
@@ -1102,6 +1210,37 @@
         spawnWorm(px, py);
       } else {
         spawnButterfly(px, py);
+      }
+    },
+    onSwipe(px, py) {
+      const hillTop = getGreenHillTopY(px);
+      if (py >= hillTop) {
+        // Grass: sprout 2-3 darker blades
+        const count = Math.floor(rand(2, 4));
+        for (let i = 0; i < count; i++) {
+          hillGrassBlades.push({
+            x: px * devicePixelRatio + rand(-8, 8) * devicePixelRatio,
+            y: py * devicePixelRatio,
+            h: rand(12, 28) * devicePixelRatio,
+            w: rand(1.5, 3) * devicePixelRatio,
+            phase: rand(0, Math.PI * 2),
+            color: `hsl(${Math.floor(rand(100, 140))}, ${Math.floor(rand(50, 70))}%, ${Math.floor(rand(25, 38))}%)`,
+            life: 1,
+            decay: rand(0.003, 0.008),
+          });
+        }
+      } else {
+        // Sky: small wispy trail cloud
+        hillTrailClouds.push({
+          x: px * devicePixelRatio,
+          y: py * devicePixelRatio,
+          w: rand(15, 30) * devicePixelRatio,
+          h: rand(4, 8) * devicePixelRatio,
+          vx: rand(-0.15, 0.15) * devicePixelRatio,
+          vy: rand(-0.05, 0.05) * devicePixelRatio,
+          life: 1,
+          decay: rand(0.004, 0.01),
+        });
       }
     },
     onResize() {
@@ -1368,8 +1507,13 @@
     // Spawn light trailing twinkles along the swipe path (throttled by distance)
     const dx = px - state.lastTwinkleX;
     const dy = py - state.lastTwinkleY;
-    if (dx * dx + dy * dy > 1600 && activeScene && activeScene.showTwinkles) { // ~40px apart
-      addTwinkle(px, py, true);
+    if (dx * dx + dy * dy > 1600) { // ~40px apart
+      if (activeScene && activeScene.showTwinkles) {
+        addTwinkle(px, py, true);
+      }
+      if (activeScene && activeScene.onSwipe) {
+        activeScene.onSwipe(px, py);
+      }
       state.lastTwinkleX = px;
       state.lastTwinkleY = py;
     }
